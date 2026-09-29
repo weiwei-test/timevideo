@@ -6,7 +6,7 @@
 set -euo pipefail
 
 SRC_IPA="${1:-vendor/KanjuAI-1.0.22-0913.ipa}"
-ICON_SVG="${2:-Tools/icon.svg}"
+ICON_SVG="${2:-Tools/icon-a-1024.png}"
 APP_NAME_CN="时光影视"
 BUNDLE_ID="com.shiguang.timevideo"
 OUT_DIR="out_rebrand"
