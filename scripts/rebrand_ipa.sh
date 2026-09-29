@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# 时光影视 · 旧壳换皮打包脚本（CI / 本地通用，本地需装有 Xcode 才能重建 Assets.car）
+# 时光影视 · 旧壳换皮打包脚本（CI / 本地通用）
+# 品牌替换：名称/BundleID/散装图标 ✅   启动屏：用 ibtool 编译新 storyboard 替换 ✅
 # 用法: bash scripts/rebrand_ipa.sh [源ipa] [图标svg]
+# 依赖: 散装图标替换无需额外依赖；启动屏替换需要 Xcode 的 ibtool（CI runner 自带）
 set -euo pipefail
 
 SRC_IPA="${1:-vendor/KanjuAI-1.0.22-0913.ipa}"
@@ -11,7 +13,7 @@ OUT_DIR="out_rebrand"
 PB=/usr/libexec/PlistBuddy
 
 rm -rf "$OUT_DIR"
-mkdir -p "$OUT_DIR/payload_root" "$OUT_DIR/assets_work"
+mkdir -p "$OUT_DIR/payload_root"
 
 echo "== 1/5 解包旧 ipa =="
 unzip -q "$SRC_IPA" -d "$OUT_DIR/payload_root"
@@ -30,53 +32,29 @@ $PB -c "Set :H5ShellAppShortName $APP_NAME_CN" "$APP_DIR/Info.plist" 2>/dev/null
 
 render() { sips -s format png -z "$1" "$1" "$ICON_SVG" --out "$2" >/dev/null; }
 
-echo "== 3/5 替换散装 App 图标 =="
+echo "== 3/5 替换散装 App 图标（iOS 安装时按 CFBundleIconFiles 读取）=="
 render 120 "$APP_DIR/AppIconKanjuAI60x60@2x.png"
 render 152 "$APP_DIR/AppIconKanjuAI76x76@2x~ipad.png"
+sips -g pixelWidth -g pixelHeight "$APP_DIR/AppIconKanjuAI60x60@2x.png" | tail -2
 
-echo "== 4/5 尝试重建 Assets.car（App 图标 + 启动图）=="
-CAR="$APP_DIR/Assets.car"
-CAR_DONE=""
-ACTOOL="$(xcrun -f actool 2>/dev/null || true)"
-if [ -n "$ACTOOL" ]; then
-  pushd "$OUT_DIR/assets_work" >/dev/null
-  if [ ! -x acextract ]; then
-    if git clone --depth 1 https://github.com/BartoszJanda/acextract acextract-src >/dev/null 2>&1; then
-      (cd acextract-src && swift build -c release >/dev/null 2>&1) || true
-      BIN=$(find acextract-src/.build -type f -name acextract 2>/dev/null | head -1)
-      [ -n "$BIN" ] && cp "$BIN" acextract && chmod +x acextract
+echo "== 4/5 编译品牌启动屏并替换 LaunchScreenKanjuAI.storyboardc =="
+LAUNCH_SB="scripts/LaunchScreenKanjuAI.storyboard"
+IBTOOL="$(xcrun -f ibtool 2>/dev/null || true)"
+NEW_DIR=""
+if [ -n "$IBTOOL" ] && [ -f "$LAUNCH_SB" ]; then
+  if "$IBTOOL" --compile "$OUT_DIR/LaunchScreenKanjuAI.storyboardc" "$LAUNCH_SB" 2>&1 | tail -2; then
+    if [ -d "$OUT_DIR/LaunchScreenKanjuAI.storyboardc" ]; then
+      rm -rf "$APP_DIR/Base.lproj/LaunchScreenKanjuAI.storyboardc"
+      cp -R "$OUT_DIR/LaunchScreenKanjuAI.storyboardc" "$APP_DIR/Base.lproj/"
+      NEW_DIR=$(ls "$APP_DIR/Base.lproj/LaunchScreenKanjuAI.storyboardc")
+      echo "启动屏已替换: $NEW_DIR"
     fi
+  else
+    echo "警告: ibtool 编译失败，保留原启动屏"
   fi
-  if [ -x acextract ]; then
-    if ./acextract -i "../../$CAR_REL" -o extracted.xcassets 2>/dev/null; then :; fi
-  fi
-  popd >/dev/null
+else
+  echo "警告: 无 ibtool($([ -z "$IBTOOL" ] && echo missing))或 storyboard 源文件，保留原启动屏"
 fi
-# 上面 acextract 路径需要 car 的真实路径，单独再处理一次（更稳妥）
-if [ -x "$OUT_DIR/assets_work/acextract" ]; then
-  if "$OUT_DIR/assets_work/acextract" -i "$CAR" -o "$OUT_DIR/assets_work/extracted.xcassets" >/dev/null 2>&1; then
-    find "$OUT_DIR/assets_work/extracted.xcassets" -maxdepth 1 -type d -name "*.imageset" | while read -r set; do
-      name=$(basename "$set")
-      case "$name" in
-        AppIconKanjuAI*|LaunchIcon*)
-          find "$set" -name "*.png" | while read -r p; do
-            px=$(sips -g pixelWidth "$p" 2>/dev/null | tail -1 | awk '{print $2}')
-            [ -n "$px" ] && render "$px" "$p"
-          done
-          ;;
-      esac
-    done
-    MINOS=$($PB -c "Print :MinimumOSVersion" "$APP_DIR/Info.plist" 2>/dev/null || echo "13.0")
-    mkdir -p "$OUT_DIR/car_out"
-    if "$ACTOOL" --compile "$OUT_DIR/car_out" --platform iphoneos --minimum-deployment-target "$MINOS" "$OUT_DIR/assets_work/extracted.xcassets" >/dev/null 2>&1 && [ -f "$OUT_DIR/car_out/Assets.car" ]; then
-      cp "$OUT_DIR/car_out/Assets.car" "$CAR"
-      find "$OUT_DIR/car_out" -maxdepth 1 -name "AppIcon*.png" -exec cp {} "$APP_DIR/" \; 2>/dev/null || true
-      CAR_DONE="yes"
-      echo "Assets.car 已重建（图标+启动图已换）"
-    fi
-  fi
-fi
-[ -z "$CAR_DONE" ] && echo "警告: Assets.car 未重建，保留原图标资源（散装图标已替换）"
 
 echo "== 5/5 重新打包 =="
 cd "$OUT_DIR/payload_root"
