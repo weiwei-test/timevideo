@@ -1,0 +1,15 @@
+{
+  "appName": "时光影视",
+  "homeURL": "https://kanju.ai",
+  "fallbackURLs": [
+    "https://kanju1.com",
+    "https://kanju13.com",
+    "https://kanju7.com",
+    "https://kanju20.com",
+    "https://souju.ai"
+  ],
+  "remoteConfigEndpoints": [],
+  "userAgentSuffix": "TimeVideo/1.0",
+  "themeColorHex": "16E05A",
+  "backgroundHex": "080706"
+}
