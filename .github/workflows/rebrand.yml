@@ -1,0 +1,40 @@
+name: Rebrand IPA (时光影视)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'vendor/**'
+      - 'scripts/rebrand_ipa.sh'
+      - 'Tools/icon.svg'
+      - '.github/workflows/rebrand.yml'
+  workflow_dispatch:
+
+jobs:
+  rebrand:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Rebrand & repack old shell to 时光影视
+        run: bash scripts/rebrand_ipa.sh
+
+      - name: Verify repacked ipa
+        run: |
+          IPA=$(ls out_rebrand/*.ipa | head -1)
+          unzip -l "$IPA" | head -8
+          unzip -p "$IPA" Payload/TimeVideo.app/Info.plist | plutil -p - | grep -E "DisplayName|BundleIdentifier"
+
+      - name: Upload rebranded ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: timevideo-rebranded-ipa
+          path: out_rebrand/*.ipa
+          retention-days: 30
